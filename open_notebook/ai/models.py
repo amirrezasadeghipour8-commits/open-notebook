@@ -156,7 +156,9 @@ class Model(ObjectModel):
         try:
             return await Credential.get(self.credential)
         except Exception:
-            logger.warning(f"Could not load credential {self.credential} for model {self.id}")
+            logger.warning(
+                f"Could not load credential {self.credential} for model {self.id}"
+            )
             return None
 
 
@@ -172,7 +174,7 @@ class DefaultModels(RecordModel):
     default_tools_model: Optional[str] = None
 
     @classmethod
-    async def get_instance(cls) -> "DefaultModels":
+    async def get_instance(cls, force_reload: bool = False) -> "DefaultModels":
         """Always fetch fresh defaults from database (override parent caching behavior)"""
         result = await repo_query(
             "SELECT * FROM ONLY $record_id",

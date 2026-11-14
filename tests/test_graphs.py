@@ -148,6 +148,35 @@ class TestTransformationGraph:
         with pytest.raises(AssertionError, match="No content to transform"):
             await run_transformation(state, config)
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("full_text", ["", "   \n\t ", None])
+    async def test_run_transformation_rejects_source_without_text(self, full_text):
+        """A source with no extracted text must not reach the model, and no
+        insight is saved (#1394)."""
+        from open_notebook.domain.transformation import Transformation
+        from open_notebook.exceptions import InvalidInputError
+
+        mock_source = MagicMock(spec=Source)
+        mock_source.full_text = full_text
+        mock_source.add_insight = AsyncMock()
+
+        state = {
+            "input_text": None,
+            "transformation": MagicMock(spec=Transformation),
+            "source": mock_source,
+        }
+        config: RunnableConfig = {"configurable": {"model_id": None}}
+
+        with patch(
+            "open_notebook.graphs.transformation.provision_langchain_model",
+            new_callable=AsyncMock,
+        ) as mock_provision:
+            with pytest.raises(InvalidInputError, match="no text content"):
+                await run_transformation(state, config)
+
+        mock_provision.assert_not_called()
+        mock_source.add_insight.assert_not_called()
+
     def test_transformation_graph_compilation(self):
         """Test that transformation graph compiles correctly."""
         assert transformation_graph is not None
@@ -281,6 +310,11 @@ class TestSaveSourceTitlePreservation:
 
 class TestContentProcessDeleteSource:
     """content-core 2.x no longer deletes the uploaded file; the graph must."""
+
+    @pytest.fixture(autouse=True)
+    def _uploads_in_tmp_path(self, tmp_path, monkeypatch):
+        # content_process only reads (and deletes) files inside the uploads folder.
+        monkeypatch.setattr("open_notebook.graphs.source.UPLOADS_FOLDER", str(tmp_path))
 
     @pytest.mark.asyncio
     @patch("open_notebook.graphs.source.extract_content")
@@ -431,6 +465,63 @@ class TestContentProcessDeleteSource:
 
     @pytest.mark.asyncio
     @patch("open_notebook.graphs.source.ContentSettings")
+    @patch("open_notebook.graphs.source.engine_runtime_missing", return_value=None)
+    @patch("open_notebook.graphs.source.extract_content")
+    @patch("open_notebook.graphs.source.ModelManager")
+    async def test_docling_vision_endpoint_env_reaches_config(
+        self,
+        mock_model_manager,
+        mock_extract,
+        _mock_runtime,
+        mock_settings,
+        monkeypatch,
+    ):
+        """The CCORE_DOCLING_VISION_* worker variables (#1478) still apply when
+        content_process builds ContentCoreConfig with its own overrides."""
+        from content_core.common import ExtractionOutput
+
+        from open_notebook.graphs.source import SourceState, content_process
+
+        monkeypatch.setenv(
+            "CCORE_DOCLING_VISION_URL", "http://vlm.local:8000/v1/chat/completions"
+        )
+        monkeypatch.setenv("CCORE_DOCLING_VISION_MODEL", "qwen2.5-vl-7b")
+        monkeypatch.setenv("CCORE_DOCLING_VISION_API_KEY", "test-key")
+
+        mm_instance = MagicMock()
+        mm_instance.get_defaults = AsyncMock(
+            return_value=MagicMock(default_speech_to_text_model=None)
+        )
+        mock_model_manager.return_value = mm_instance
+        mock_settings.get_instance = AsyncMock(
+            return_value=MagicMock(
+                youtube_preferred_languages=None,
+                default_content_processing_engine_url=None,
+                default_content_processing_engine_doc="docling",
+                docling_ocr=None,
+                docling_formulas=None,
+                docling_vision=True,
+            )
+        )
+        mock_extract.return_value = ExtractionOutput(title="T", content="body")
+
+        state = {
+            "source_id": "source:123",
+            "content_state": {"url": "https://example.com"},
+            "embed": False,
+            "apply_transformations": [],
+        }
+
+        await content_process(cast(SourceState, state))
+
+        config = mock_extract.await_args.kwargs["config"]
+        assert config.docling_vision is True
+        assert config.docling_vision_url == "http://vlm.local:8000/v1/chat/completions"
+        assert config.docling_vision_model == "qwen2.5-vl-7b"
+        assert config.docling_vision_api_key == "test-key"
+
+    @pytest.mark.asyncio
+    @patch("open_notebook.graphs.source.ContentSettings")
     @patch("open_notebook.graphs.source.extract_content")
     @patch("open_notebook.graphs.source.ModelManager")
     async def test_persisted_youtube_languages_wired_into_config(
@@ -572,6 +663,103 @@ class TestContentProcessDeleteSource:
         config = mock_extract.await_args.kwargs["config"]
         assert config.url_engine == "firecrawl"
         assert config.document_engine == "simple"
+
+    @staticmethod
+    def _stt_setup(mock_model_manager, mock_model, linked_credential):
+        mm_instance = MagicMock()
+        mm_instance.get_defaults = AsyncMock(
+            return_value=MagicMock(default_speech_to_text_model="model:stt1")
+        )
+        mock_model_manager.return_value = mm_instance
+        # `name=` can't be passed via the MagicMock constructor: it sets the
+        # mock's own repr name, not a `.name` attribute.
+        mock_stt_model = MagicMock()
+        mock_stt_model.provider = "openai"
+        mock_stt_model.name = "gpt-4o-mini-transcribe"
+        mock_stt_model.get_credential_obj = AsyncMock(return_value=linked_credential)
+        mock_model.get = AsyncMock(return_value=mock_stt_model)
+
+    @pytest.mark.asyncio
+    @patch("open_notebook.ai.key_provider.provision_provider_keys")
+    @patch("open_notebook.graphs.source.Model")
+    @patch("open_notebook.graphs.source.extract_content")
+    @patch("open_notebook.graphs.source.ModelManager")
+    async def test_stt_key_provisioned_before_extraction(
+        self, mock_model_manager, mock_extract, mock_model, mock_provision, tmp_path
+    ):
+        """The default STT model's provider env vars must be provisioned before
+        content-core runs, the same fallback resolve_* / get_model use for
+        language and embedding models (see #567, which fixed the same class
+        of bug for embeddings).
+
+        content-core builds its speech-to-text client from process env vars
+        only, so without this it raises ConfigurationError when
+        OPENAI_API_KEY is unset, even though a credential is configured in
+        the UI.
+        """
+        from content_core.common import ExtractionOutput
+
+        from open_notebook.graphs.source import SourceState, content_process
+
+        self._stt_setup(mock_model_manager, mock_model, linked_credential=None)
+        calls: list[str] = []
+
+        async def provision(*args, **kwargs):
+            calls.append("provision")
+            return True
+
+        async def extract(*args, **kwargs):
+            calls.append("extract")
+            return ExtractionOutput(title="T", content="body")
+
+        mock_provision.side_effect = provision
+        mock_extract.side_effect = extract
+        audio = tmp_path / "audio.mp3"
+        audio.write_bytes(b"fake")
+
+        state = {
+            "source_id": "source:123",
+            "content_state": {"file_path": str(audio)},
+            "embed": False,
+            "apply_transformations": [],
+        }
+
+        await content_process(cast(SourceState, state))
+
+        assert calls == ["provision", "extract"]
+        mock_provision.assert_awaited_once_with("openai", credential=None)
+
+    @pytest.mark.asyncio
+    @patch("open_notebook.ai.key_provider.provision_provider_keys")
+    @patch("open_notebook.graphs.source.Model")
+    @patch("open_notebook.graphs.source.extract_content")
+    @patch("open_notebook.graphs.source.ModelManager")
+    async def test_stt_model_linked_credential_is_provisioned(
+        self, mock_model_manager, mock_extract, mock_model, mock_provision, tmp_path
+    ):
+        """With several credentials for one provider, the STT model's own linked
+        credential is provisioned, not the provider's first one."""
+        from content_core.common import ExtractionOutput
+
+        from open_notebook.graphs.source import SourceState, content_process
+
+        linked = MagicMock()
+        self._stt_setup(mock_model_manager, mock_model, linked_credential=linked)
+        mock_provision.return_value = True
+        mock_extract.return_value = ExtractionOutput(title="T", content="body")
+        audio = tmp_path / "audio.mp3"
+        audio.write_bytes(b"fake")
+
+        state = {
+            "source_id": "source:123",
+            "content_state": {"file_path": str(audio)},
+            "embed": False,
+            "apply_transformations": [],
+        }
+
+        await content_process(cast(SourceState, state))
+
+        mock_provision.assert_awaited_once_with("openai", credential=linked)
 
 
 # ============================================================================
