@@ -450,6 +450,8 @@ export const jaJP = {
     deleteSession: "セッションを削除",
     deleteSessionDesc: "このチャットセッションを削除しますか？この操作は元に戻せません。",
     sendPlaceholder: "ソースについて何でも質問してください...",
+    send: "メッセージを送信",
+    noChatModel: "チャットモデルが選択されていません。チャットするにはモデルページで設定してください。",
     sessionsTitle: "チャットセッション",
     chatWith: "{{name}}とチャット",
     startConversationSource: "このソースについて会話を始めましょう",

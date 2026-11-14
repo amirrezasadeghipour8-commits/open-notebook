@@ -450,6 +450,8 @@ export const frFR = {
     deleteSession: "Supprimer la session",
     deleteSessionDesc: "Êtes-vous sûr de vouloir supprimer cette session de chat ? Cette action est irréversible.",
     sendPlaceholder: "Posez n'importe quelle question sur vos sources...",
+    send: "Envoyer le message",
+    noChatModel: "Aucun modèle de chat n'est sélectionné. Configurez-en un dans la page Modèles pour discuter.",
     sessionsTitle: "Sessions de Chat",
     chatWith: "Discuter avec {{name}}",
     startConversationSource: "Commencer une conversation sur cette source",

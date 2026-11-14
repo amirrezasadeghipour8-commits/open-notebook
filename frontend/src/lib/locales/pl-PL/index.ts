@@ -450,6 +450,8 @@ export const plPL = {
     deleteSession: "Usuń sesję",
     deleteSessionDesc: "Czy na pewno chcesz usunąć tę sesję czatu? Tej operacji nie można cofnąć.",
     sendPlaceholder: "Zapytaj o cokolwiek dotyczące swoich źródeł...",
+    send: "Wyślij wiadomość",
+    noChatModel: "Nie wybrano modelu czatu. Skonfiguruj go na stronie Modele, aby rozmawiać.",
     sessionsTitle: "Sesje czatu",
     chatWith: "Czat z {{name}}",
     startConversationSource: "Rozpocznij rozmowę o tym źródle",

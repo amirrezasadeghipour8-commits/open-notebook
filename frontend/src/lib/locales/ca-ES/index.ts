@@ -450,6 +450,8 @@ export const caES = {
     deleteSession: "Suprimeix la sessió",
     deleteSessionDesc: "Segur que vols suprimir aquesta sessió de xat? Aquesta acció no es pot desfer.",
     sendPlaceholder: "Pregunta qualsevol cosa sobre les teves fonts...",
+    send: "Envia el missatge",
+    noChatModel: "No hi ha cap model de xat seleccionat. Configura'n un a la pàgina Models per xatejar.",
     sessionsTitle: "Sessions de xat",
     chatWith: "Xat amb {{name}}",
     startConversationSource: "Inicia una conversa sobre aquesta font",

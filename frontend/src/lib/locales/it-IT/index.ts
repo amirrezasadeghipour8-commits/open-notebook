@@ -450,6 +450,8 @@ export const itIT = {
     deleteSession: "Elimina sessione",
     deleteSessionDesc: "Sei sicuro di voler eliminare questa sessione chat? Questa azione non può essere annullata.",
     sendPlaceholder: "Chiedi qualsiasi cosa sulle tue fonti...",
+    send: "Invia messaggio",
+    noChatModel: "Nessun modello di chat selezionato. Configurane uno nella pagina modelli per chattare.",
     sessionsTitle: "Sessioni chat",
     chatWith: "Chatta con {{name}}",
     startConversationSource: "Inizia una conversazione su questa fonte",
